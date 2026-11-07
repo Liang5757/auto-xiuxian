@@ -1,8 +1,11 @@
 #![windows_subsystem = "windows"]
+mod clicker;
 mod native;
 mod session;
+mod tray;
+mod ui;
 mod vision;
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui;
 use session::{Event, Session};
 use std::{
     collections::VecDeque,
@@ -31,10 +34,11 @@ struct App {
     interval: u64,
     right: bool,
     key: i32,
-    held: bool,
+    clicker: clicker::Clicker,
+    tray: Option<tray::Tray>,
+    hidden: bool,
     game: Option<isize>,
     scan: Instant,
-    next: Instant,
     closing: bool,
 }
 impl App {
@@ -48,18 +52,49 @@ impl App {
                 .font_data
                 .insert("cjk".into(), Arc::new(egui::FontData::from_owned(bytes)));
             for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-                fonts.families.entry(family).or_default().push("cjk".into())
+                fonts
+                    .families
+                    .entry(family)
+                    .or_default()
+                    .insert(0, "cjk".into())
             }
         }
+        let heading = egui::FontFamily::Name("heading".into());
+        let mut heading_fonts = fonts.families[&egui::FontFamily::Proportional].clone();
+        if let Ok(bytes) = std::fs::read(format!(
+            r"{}\Fonts\msyhbd.ttc",
+            std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into())
+        )) {
+            fonts.font_data.insert(
+                "cjk-bold".into(),
+                Arc::new(egui::FontData::from_owned(bytes)),
+            );
+            heading_fonts.insert(0, "cjk-bold".into());
+        }
+        fonts.families.insert(heading, heading_fonts);
         cc.egui_ctx.set_fonts(fonts);
         cc.egui_ctx.set_visuals(egui::Visuals::light());
+        cc.egui_ctx.style_mut(|style| {
+            style.visuals.override_text_color = Some(egui::Color32::from_rgb(22, 23, 29));
+            style.visuals.selection.bg_fill = egui::Color32::from_rgb(121, 75, 234);
+            style
+                .text_styles
+                .insert(egui::TextStyle::Body, egui::FontId::proportional(17.));
+            style
+                .text_styles
+                .insert(egui::TextStyle::Button, egui::FontId::proportional(16.));
+        });
         let (tx, rx) = mpsc::channel();
-        Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let lock = Arc::new(Mutex::new(()));
+        let clicker = clicker::Clicker::new(lock.clone(), stop.clone());
+        let tray_result = tray::Tray::new(cc.egui_ctx.clone());
+        let mut app = Self {
             dispatch_page: true,
             running: false,
             clicking: false,
-            stop: Arc::new(AtomicBool::new(false)),
-            lock: Default::default(),
+            stop,
+            lock,
             tx,
             rx,
             status: "已停止".into(),
@@ -72,12 +107,18 @@ impl App {
             interval: 100,
             right: false,
             key: 0x75,
-            held: false,
+            clicker,
+            tray: None,
+            hidden: false,
             game: None,
             scan: Instant::now(),
-            next: Instant::now(),
             closing: false,
+        };
+        match tray_result {
+            Ok(tray) => app.tray = Some(tray),
+            Err(error) => app.log(error),
         }
+        app
     }
     fn log(&mut self, s: String) {
         let mut t = unsafe { std::mem::zeroed() };
@@ -102,13 +143,26 @@ impl App {
         }
     }
     fn click_switch(&mut self) {
-        self.clicking = !self.clicking;
-        self.click_status = if self.clicking {
+        self.clicker.enabled.fetch_xor(true, Ordering::Relaxed);
+        self.clicking = self.clicker.enabled.load(Ordering::Relaxed);
+        *self.clicker.status.lock().unwrap() = if self.clicking {
             "等待鼠标指向游戏"
         } else {
             "已停止"
         }
-        .into()
+        .into();
+    }
+    fn background(&mut self, ctx: &egui::Context) {
+        if self.tray.is_some() {
+            self.hidden = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        }
+    }
+    fn exit(&mut self) {
+        self.closing = true;
+        self.clicker.stop();
+        self.stop.store(true, Ordering::Relaxed);
+        self.status = "完成当前操作后退出".into();
     }
     fn poll(&mut self) {
         while let Ok(e) = self.rx.try_recv() {
@@ -135,180 +189,69 @@ impl App {
             self.game = native::game().ok().flatten();
             self.scan = now + Duration::from_secs(2)
         }
-        if self.running && native::key(0x1b) {
-            self.stop.store(true, Ordering::Relaxed);
-        }
-        let held = native::key(self.key);
-        if held && !self.held && !self.closing {
-            self.click_switch()
-        }
-        self.held = held;
-        if self.clicking && now >= self.next {
-            self.next = now + Duration::from_millis(self.interval);
-            if let Ok(_g) = self.lock.try_lock() {
-                match self.game.map(|h| native::repeat_click(h, self.right)) {
-                    Some(Ok(true)) => {
-                        self.clicks += 1;
-                        self.click_status = "正在连点".into()
-                    }
-                    Some(Err(e)) => {
-                        self.clicking = false;
-                        self.click_status = e
-                    }
-                    _ => self.click_status = "等待鼠标指向游戏".into(),
-                }
-            } else {
-                self.click_status = "派遣检查中".into()
-            }
-        }
+        self.clicking = self.clicker.enabled.load(Ordering::Relaxed);
+        self.clicks = self.clicker.count.load(Ordering::Relaxed);
+        self.click_status = self.clicker.status.lock().unwrap().clone();
+        *self.clicker.settings.lock().unwrap() = clicker::Settings {
+            interval: self.interval,
+            right: self.right,
+            key: self.key,
+        };
     }
 }
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         self.poll();
-        if ctx.input(|i| i.viewport().close_requested()) && self.running {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.closing = true;
-            self.clicking = false;
-            self.stop.store(true, Ordering::Relaxed);
-            self.status = "完成当前操作后关闭".into()
+        let events: Vec<_> = self
+            .tray
+            .as_ref()
+            .map(|tray| tray.events.try_iter().collect())
+            .unwrap_or_default();
+        for event in events {
+            match event {
+                tray::Event::Show => self.hidden = false,
+                tray::Event::Exit => {
+                    self.hidden = false;
+                    self.exit();
+                }
+            }
+        }
+        let close = ctx.input(|i| i.viewport().close_requested());
+        if close && !self.closing {
+            if self.tray.is_some() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.background(ctx);
+            } else {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.exit();
+            }
+        }
+        if !self.hidden && !self.closing && ctx.input(|i| i.viewport().minimized == Some(true)) {
+            self.background(ctx);
         }
         if self.closing && !self.running {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close)
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
-        egui::SidePanel::left("nav")
-            .resizable(false)
-            .exact_width(180.)
-            .frame(
-                egui::Frame::new()
-                    .fill(Color32::from_rgb(37, 38, 49))
-                    .inner_margin(16),
-            )
-            .show(ctx, |ui| {
-                ui.add_space(12.);
-                ui.heading(RichText::new("◆ 修仙助手").color(Color32::WHITE));
-                ui.add_space(30.);
-                for (page, title) in [(true, "自动派遣"), (false, "连点器")] {
-                    let selected = self.dispatch_page == page;
-                    let b = egui::Button::new(RichText::new(title).color(Color32::WHITE).size(17.))
-                        .fill(if selected {
-                            Color32::from_rgb(98, 73, 136)
-                        } else {
-                            Color32::TRANSPARENT
-                        });
-                    if ui.add_sized([148., 40.], b).clicked() {
-                        self.dispatch_page = page
-                    }
-                }
-                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                    ui.colored_label(
-                        Color32::LIGHT_GREEN,
-                        if self.game.is_some() {
-                            "● 游戏已连接"
-                        } else {
-                            "○ 等待游戏启动"
-                        },
-                    );
-                });
-            });
-        egui::CentralPanel::default()
-            .frame(
-                egui::Frame::new()
-                    .fill(Color32::from_rgb(247, 247, 252))
-                    .inner_margin(24),
-            )
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.heading(if self.dispatch_page {
-                        "自动派遣"
-                    } else {
-                        "连点器"
-                    });
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let on = if self.dispatch_page {
-                            self.running
-                        } else {
-                            self.clicking
-                        };
-                        if ui
-                            .add_sized(
-                                [90., 32.],
-                                egui::Button::new(if on {
-                                    "● 已开启"
-                                } else {
-                                    "○ 已关闭"
-                                })
-                                .selected(on),
-                            )
-                            .clicked()
-                        {
-                            if self.dispatch_page {
-                                self.toggle()
-                            } else {
-                                self.click_switch()
-                            }
-                        }
-                    });
-                });
-                ui.add_space(15.);
-                ui.separator();
-                if self.dispatch_page {
-                    ui.label(format!("{}     │     每 30 秒检查", self.status));
-                    ui.separator();
-                    ui.add_space(10.);
-                    ui.columns(3, |cols| {
-                        for (col, (k, v)) in cols.iter_mut().zip([
-                            ("成功", self.ok.to_string()),
-                            ("失败", self.fail.to_string()),
-                            ("当前地图", self.map.clone()),
-                        ]) {
-                            col.label(k);
-                            col.heading(v);
-                        }
-                    });
-                    ui.add_space(15.);
-                    ui.separator();
-                    ui.heading("最近活动");
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        for s in &self.logs {
-                            ui.label(s);
-                            ui.separator();
-                        }
-                    });
-                } else {
-                    ui.label(&self.click_status);
-                    ui.add_enabled_ui(!self.clicking, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label("点击间隔（毫秒）");
-                            ui.add(egui::DragValue::new(&mut self.interval).range(30..=60000));
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("鼠标按键");
-                            ui.selectable_value(&mut self.right, false, "左键");
-                            ui.selectable_value(&mut self.right, true, "右键");
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("启停热键");
-                            for (k, v) in [(0x75, "F6"), (0x76, "F7"), (0x78, "F9")] {
-                                ui.selectable_value(&mut self.key, k, v);
-                            }
-                        });
-                    });
-                    ui.separator();
-                    ui.heading(format!("已点击 {} 次", self.clicks));
-                    ui.label("鼠标指向游戏时连点。派遣检查期间暂停连点。");
-                }
-            });
-        ctx.request_repaint_after(Duration::from_millis(if self.clicking { 15 } else { 50 }));
+        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Q)) {
+            self.exit();
+        }
+        if !self.hidden {
+            self.draw(ctx);
+        }
+        ctx.request_repaint_after(Duration::from_millis(if self.hidden { 250 } else { 50 }));
     }
 }
 fn main() -> eframe::Result {
+    if tray::show_existing() {
+        return Ok(());
+    }
     eframe::run_native(
         "修仙助手",
         eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
-                .with_inner_size([940., 525.])
-                .with_min_inner_size([760., 440.]),
+                .with_inner_size([800., 540.])
+                .with_icon(ui::window_icon())
+                .with_min_inner_size([760., 510.]),
             ..Default::default()
         },
         Box::new(|cc| Ok(Box::new(App::new(cc)))),
