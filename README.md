@@ -1,25 +1,64 @@
 # 修仙助手
 
-Windows 桌面助手。双击根目录的 `修仙助手.exe` 打开界面。自动派遣与连点器启动时均关闭。发行版请求管理员权限，以便给管理员模式的游戏发送窗口消息。
+Windows 桌面助手。Electron + React + TypeScript 负责界面，Rust 负责截图识别、自动派遣、连点和全局热键。
 
-开启自动派遣后立即检查，之后每 30 秒检查一次。识别到小队从蛮荒返回的蓝色提示后，助手进入蛮荒，重新派遣并返回原挂机地图。最小化的游戏会短暂还原并在检查后重新最小化。首次在其他挂机地图触发派遣时，根据日志提示用 F8 标记回程位置。每轮操作计数一次，空轮询不计数。
+## 目录
 
-## 后台运行
+~~~text
+auto-xiuxian/
+├─ desktop/                    Electron 与 React 桌面工程
+│  ├─ electron/                主进程、preload、Rust 进程通信
+│  ├─ src/
+│  │  ├─ components/           React 组件及就近 SCSS
+│  │  ├─ types.ts              前端通信类型
+│  │  └─ useEngineState.ts     后台状态订阅
+│  ├─ assets/                  应用图标
+│  ├─ index.html
+│  └─ package.json
+├─ xiuxian-rs/                 Rust workspace
+│  ├─ core/                    派遣、识图、连点、窗口操作
+│  ├─ app-server/              main.rs 处理传输，engine.rs 管理状态
+│  ├─ app-server-protocol/     请求、命令与状态快照类型
+│  ├─ Cargo.toml
+│  ├─ Cargo.lock
+│  └─ rust-toolchain.toml
+├─ scripts/                    开发编排
+├─ design/                     设计稿与截图
+├─ package.json                工作区统一命令
+└─ 修仙助手.exe                最终便携版入口
+~~~
 
-点击右上角“后台运行”、最小化或关闭窗口都会隐藏到系统托盘，已开启的任务继续执行。双击托盘图标或再次打开 EXE 可恢复原窗口。右键托盘选择“退出”，或者在窗口中按 Ctrl+Q，可完全退出。退出时停止连点并等待当前派遣操作收尾。
+Rust 目录参照 Codex 公开仓库的 core、app-server、app-server-protocol 分层。desktop 是本项目的 Electron/React 工程，进程间使用逐行 JSON 通信。参考 [Codex App Server 官方文档](https://learn.chatgpt.com/docs/app-server)。
 
-连点与热键监听由独立线程执行，托盘隐藏期间仍可使用设置的 F6、F7 或 F9 启停连点，Esc 可停止自动派遣。
+## 开发
 
-## 构建
+安装 Node.js 22.12+、Rust MSVC 工具链后，在仓库根目录运行。
 
-安装 Windows MSVC 版 Rust 工具链，在仓库根目录运行：
+~~~powershell
+npm ci
+npx install-electron
+npm run dev
+~~~
 
-```powershell
-cargo test --locked --release
-cargo build --locked --release --features admin
-Copy-Item target/release/xiuxian.exe 修仙助手.exe
-```
+开发模式下 React 支持热更新。修改界面布局可从 desktop/src/components/App/index.tsx 开始，每个组件的样式位于同目录的 index.module.scss。需要操作管理员身份的游戏时，以管理员身份启动开发终端。
 
-模板已嵌入可执行文件。运行时只需该 EXE。界面在 `src/ui/mod.rs`，派遣流程在 `src/session.rs`，Win32 窗口操作和图像识别分别在 `src/native.rs`、`src/vision.rs`。
+## 功能
 
-界面设计基准与原始设计稿保存在 design/ 目录。
+自动派遣与连点器默认关闭。开启派遣后立即检查，之后每 30 秒检查一次。只有发现小队返回的蓝色提示才进入蛮荒派遣，完成后返回原挂机地图。一次操作计一次成功或失败，失败后等待 30 秒继续轮询。如果未完成回程，下一轮先尝试恢复原地图。首次在其他地图使用时，按运行记录提示用 F8 标记原地图。
+
+游戏最小化时会短暂还原检查，然后重新最小化。连点和热键由 Rust 独立线程处理，Electron 窗口隐藏后继续运行。
+
+“后台运行”、最小化和关闭窗口都隐藏到托盘。双击托盘或再次打开 EXE 恢复已有窗口。托盘菜单“退出”或 Ctrl+Q 会停止连点，等待当前派遣收尾后退出。
+
+## 验证与打包
+
+~~~powershell
+npm run check
+npm run build
+~~~
+
+便携版位于 release/修仙助手.exe，包含 Electron、React 页面、Rust 后台与图标。复制到根目录即可使用单个 EXE 启动。发行版请求管理员权限，以便操作管理员身份运行的游戏。
+
+JavaScript/TypeScript 函数行数由 scripts/check-functions.mjs 检查，Rust 由 workspace Clippy 配置约束，上限均为 200 行。命令校验集中在 desktop/electron/commands.cjs，进程通信与退出异常的回归测试在 desktop/electron/engine.test.cjs。
+
+飞剑祥云图标的设计说明位于 design/icon.md。

@@ -1,5 +1,12 @@
 /runtime/
 /*.exe
 /target/
+/xiuxian-rs/target/
+/node_modules/
+/desktop/node_modules/
+/dist/
+/desktop/dist/
+/release/
 __pycache__/
 *.pyc
+/*.lnk

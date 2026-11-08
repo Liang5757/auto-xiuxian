@@ -22,6 +22,7 @@ pub struct Clicker {
     shutdown: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
+
 impl Clicker {
     pub fn new(busy: Arc<Mutex<()>>, dispatch_stop: Arc<AtomicBool>) -> Self {
         let mut this = Self {
@@ -94,19 +95,19 @@ impl Clicker {
         }));
         this
     }
-}
-impl Clicker {
-    pub fn stop(&self) {
-        self.enabled.store(false, Ordering::Relaxed);
-        self.shutdown.store(true, Ordering::Relaxed);
-    }
-}
-impl Drop for Clicker {
-    fn drop(&mut self) {
+
+    pub fn stop(&mut self) {
         self.shutdown.store(true, Ordering::Relaxed);
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+        self.enabled.store(false, Ordering::Relaxed);
+        *self.status.lock().unwrap() = "已停止".into();
+    }
+}
+impl Drop for Clicker {
+    fn drop(&mut self) {
+        self.stop();
     }
 }
 
@@ -117,7 +118,7 @@ mod tests {
     fn continues_without_ui_updates_and_stops() {
         let busy = Arc::new(Mutex::new(()));
         let _guard = busy.lock().unwrap();
-        let clicker = Clicker::new(busy.clone(), Arc::new(AtomicBool::new(false)));
+        let mut clicker = Clicker::new(busy.clone(), Arc::new(AtomicBool::new(false)));
         clicker.settings.lock().unwrap().key = 0;
         clicker.enabled.store(true, Ordering::Relaxed);
         let until = Instant::now() + Duration::from_secs(2);
@@ -128,6 +129,7 @@ mod tests {
         assert_eq!(clicker.count.load(Ordering::Relaxed), 0);
         clicker.stop();
         assert!(!clicker.enabled.load(Ordering::Relaxed));
+        assert!(clicker.thread.is_none());
         drop(clicker);
     }
 }

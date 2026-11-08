@@ -1,0 +1,31 @@
+.toggle {
+  width: 42px;
+  height: 24px;
+  border: 0;
+  padding: 3px;
+  border-radius: 20px;
+  background: #dadee8;
+  flex-shrink: 0;
+  transition: background 0.18s;
+  span {
+    display: block;
+    width: 18px;
+    height: 18px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.18s;
+    box-shadow: 0 1px 3px #00000012;
+  }
+  &[data-on='true'] {
+    background: #7155e0;
+    span {
+      transform: translateX(18px);
+    }
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toggle,
+  .toggle span {
+    transition: none;
+  }
+}

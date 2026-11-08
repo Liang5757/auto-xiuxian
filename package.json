@@ -1,0 +1,25 @@
+{
+  "name": "xiuxian-workspace",
+  "version": "0.2.0",
+  "private": true,
+  "workspaces": [
+    "desktop"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace desktop",
+    "start": "npm run start --workspace desktop",
+    "typecheck": "npm run typecheck --workspace desktop",
+    "build:engine": "cd xiuxian-rs && cargo build --locked --release",
+    "test:engine": "cd xiuxian-rs && cargo test --locked --release",
+    "check:engine": "cd xiuxian-rs && cargo clippy --locked --release --all-targets -- -D warnings",
+    "build:renderer": "npm run build:renderer --workspace desktop",
+    "build": "npm run build:engine && npm run build --workspace desktop",
+    "check:functions": "node scripts/check-functions.mjs",
+    "format:check": "prettier --check \"desktop/src/**/*.{ts,tsx,scss}\" \"desktop/electron/*.cjs\" \"scripts/*.mjs\"",
+    "test:desktop": "npm run build:engine && node --test desktop/electron/*.test.cjs",
+    "check": "npm run format:check && npm run check:functions && npm run typecheck && npm run check:engine && npm run test:engine && npm run test:desktop"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.10"
+  }
+}

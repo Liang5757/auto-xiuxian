@@ -24,6 +24,12 @@ pub struct Session {
     pub busy: Arc<std::sync::Mutex<()>>,
     refs: Refs,
     homes: Vec<(Template, (i32, i32))>,
+    return_map: Option<ReturnMap>,
+}
+struct ReturnMap {
+    title: Template,
+    point: (i32, i32),
+    name: String,
 }
 impl Session {
     pub fn new(stop: Arc<AtomicBool>, tx: Sender<Event>, busy: Arc<std::sync::Mutex<()>>) -> Self {
@@ -33,6 +39,7 @@ impl Session {
             busy,
             refs: Refs::load(),
             homes: vec![],
+            return_map: None,
         }
     }
     fn emit(&self, e: Event) {
@@ -114,20 +121,28 @@ impl Session {
             return Ok(0);
         }
         self.emit(Event::State("正在派遣".into()));
-        let title = f.crop(677, 122, 97, 24);
         if !self.refs.has(&f, "petpanel", 1344, 93) {
             win::click(h, 1430, 73, false)?;
             self.wait_key(h, "petpanel", 1344, 93, "宠物栏未打开")?;
         }
+        let known_home = if origin {
+            Some((1270, 779))
+        } else {
+            self.homes
+                .iter()
+                .find(|(t, _)| t.matches(&f.gray, 677, 122, 6))
+                .map(|(_, point)| *point)
+        };
+        if let Some(point) = known_home {
+            self.return_map = Some(ReturnMap {
+                title: f.crop(677, 122, 97, 24),
+                point,
+                name: name.into(),
+            });
+        }
         self.world(h)?;
-        let home = if origin {
-            (1270, 779)
-        } else if let Some((_, p)) = self
-            .homes
-            .iter()
-            .find(|(t, _)| t.matches(&f.gray, 677, 122, 6))
-        {
-            *p
+        let home = if let Some(point) = known_home {
+            point
         } else {
             self.log("请切到游戏，鼠标指向原挂机地图图标，按 F8");
             let p = loop {
@@ -145,6 +160,13 @@ impl Session {
             self.homes.push((f.crop(677, 122, 97, 24), p));
             p
         };
+        if self.return_map.is_none() {
+            self.return_map = Some(ReturnMap {
+                title: f.crop(677, 122, 97, 24),
+                point: home,
+                name: name.into(),
+            });
+        }
         win::click(h, 363, 457, false)?;
         self.wait_key(h, "expedition", 42, 58, "未进入蛮荒之地")?;
         self.emit(Event::Map("蛮荒之地".into()));
@@ -156,23 +178,33 @@ impl Session {
                 self.log(format!("第 {} 支小队重新出发", i + 1))
             }
         }
-        self.world(h)?;
-        win::click(h, home.0, home.1, false)?;
-        self.wait(
-            h,
-            |f| {
-                self.refs.has(f, "current", 686, 96)
-                    && title.matches(&f.gray, 677, 122, 6)
-                    && !self.refs.has(f, "world", 276, 751)
-            },
-            "回程地图核对失败",
-        )?;
-        self.emit(Event::Map(name.into()));
-        self.log("已回到原地图");
+        self.restore_home(h)?;
         if count == 0 {
             return Err("返回提示与队伍状态不一致".into());
         }
         Ok(count)
+    }
+    fn restore_home(&mut self, h: isize) -> Result<()> {
+        let Some(home) = self.return_map.as_ref() else {
+            return Ok(());
+        };
+        let at_home = |f: &Frame| {
+            self.refs.has(f, "current", 686, 96)
+                && home.title.matches(&f.gray, 677, 122, 6)
+                && !self.refs.has(f, "world", 276, 751)
+        };
+        let frame = self.frame(h)?;
+        if !at_home(&frame) {
+            if !self.refs.has(&frame, "world", 276, 751) {
+                self.world(h)?;
+            }
+            win::click(h, home.point.0, home.point.1, false)?;
+            self.wait(h, at_home, "回程地图核对失败")?;
+        }
+        let home = self.return_map.take().unwrap();
+        self.emit(Event::Map(home.name));
+        self.log("已回到原地图");
+        Ok(())
     }
     fn round(&mut self, h: isize, initial: bool) -> Result<usize> {
         let mini = win::minimized(h);
@@ -184,6 +216,7 @@ impl Session {
                     return Err("还原后游戏获得焦点".into());
                 }
             }
+            self.restore_home(h)?;
             self.inspect(h, initial)
         })();
         if mini {
@@ -195,45 +228,55 @@ impl Session {
         unsafe {
             windows_sys::Win32::UI::HiDpi::SetThreadDpiAwarenessContext(-4);
         }
+        self.run_loop(Self::check, Self::pause);
+    }
+    fn check(&mut self, initial: bool) -> Result<Option<usize>> {
+        let Some(h) = win::game()? else {
+            return Ok(None);
+        };
+        let lock = self.busy.clone();
+        let _guard = lock.lock().unwrap();
+        self.round(h, initial).map(Some)
+    }
+    fn run_loop(
+        &mut self,
+        mut check: impl FnMut(&mut Self, bool) -> Result<Option<usize>>,
+        mut pause: impl FnMut(&Self, u32),
+    ) {
         let mut initial = true;
         let mut waiting = false;
         while !self.stop.load(Ordering::Relaxed) {
-            let h = match win::game() {
-                Ok(Some(h)) => h,
+            let result = check(self, initial);
+            match result {
                 Ok(None) => {
                     if !waiting {
                         self.emit(Event::State("等待游戏启动".into()));
                         waiting = true
                     }
-                    self.pause(2);
+                    pause(self, 2);
                     continue;
                 }
-                Err(e) => {
-                    self.log(e);
-                    break;
+                Ok(Some(count)) => {
+                    if count > 0 {
+                        self.emit(Event::Success(count));
+                    }
+                    initial = false;
+                    self.emit(Event::State("正在监听".into()));
                 }
-            };
-            let lock = self.busy.clone();
-            let result = {
-                let _guard = lock.lock().unwrap();
-                self.round(h, initial)
-            };
-            match result {
-                Ok(0) => {}
-                Ok(n) => self.emit(Event::Success(n)),
                 Err(e) => {
                     if self.stop.load(Ordering::Relaxed) {
-                        self.log(e)
-                    } else {
-                        self.emit(Event::Failure(e))
+                        self.log(e);
+                        break;
                     }
-                    break;
+                    self.emit(Event::Failure(e));
+                    self.emit(Event::State("本轮失败，30 秒后重试".into()));
                 }
             }
-            self.emit(Event::State("正在监听".into()));
-            initial = false;
+            if self.stop.load(Ordering::Relaxed) {
+                break;
+            }
             waiting = false;
-            self.pause(30)
+            pause(self, 30)
         }
         self.emit(Event::Stopped)
     }
@@ -244,6 +287,82 @@ impl Session {
             }
             std::thread::sleep(Duration::from_millis(100))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failures_keep_polling_and_later_rounds_can_succeed() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut job = Session::new(Default::default(), tx, Default::default());
+        let mut checks = 0;
+        let mut pauses = Vec::new();
+        job.run_loop(
+            |job, initial| {
+                assert_eq!(initial, checks < 3);
+                let result = match checks {
+                    0 | 1 => Err("模拟本轮失败".into()),
+                    2 => Ok(Some(2)),
+                    3 => Ok(None),
+                    4 => Ok(Some(0)),
+                    5 => {
+                        job.stop.store(true, Ordering::Relaxed);
+                        Err("用户取消".into())
+                    }
+                    _ => panic!("取消后仍在检查"),
+                };
+                checks += 1;
+                result
+            },
+            |_, seconds| pauses.push(seconds),
+        );
+        let events: Vec<_> = rx.try_iter().collect();
+        assert_eq!(checks, 6);
+        assert_eq!(pauses, [30, 30, 30, 2, 30]);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| matches!(e, Event::Failure(_)))
+                .count(),
+            2
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| matches!(e, Event::Success(2)))
+                .count(),
+            1
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| matches!(e, Event::Stopped))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn stop_during_retry_wait_prevents_another_round() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut job = Session::new(Default::default(), tx, Default::default());
+        let mut checks = 0;
+        job.run_loop(
+            |_, _| {
+                checks += 1;
+                Err("模拟失败".into())
+            },
+            |job, seconds| {
+                assert_eq!(seconds, 30);
+                job.stop.store(true, Ordering::Relaxed);
+            },
+        );
+        assert_eq!(checks, 1);
+        let events: Vec<_> = rx.try_iter().collect();
+        assert!(matches!(events.last(), Some(Event::Stopped)));
     }
 }
 

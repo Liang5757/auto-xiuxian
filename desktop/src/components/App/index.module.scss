@@ -1,0 +1,44 @@
+.app {
+  display: flex;
+  height: 100vh;
+  min-height: 500px;
+  overflow: hidden;
+}
+.main {
+  flex: 1;
+  min-width: 0;
+  padding: 20px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  min-height: 51px;
+  flex-shrink: 0;
+  margin-bottom: 0;
+  p {
+    font-size: 11px;
+    color: #848b9b;
+    margin-top: 8px;
+  }
+  > button {
+    border: 0;
+    border-radius: 7px;
+    background: #f1edfd;
+    color: #7155e0;
+    padding: 7px 14px;
+    font-size: 11px;
+  }
+}
+.error {
+  padding: 8px 12px;
+  border-radius: 7px;
+  background: #fff0ef;
+  border: 1px solid #f4d7d4;
+  color: #aa4d43;
+  font-size: 12px;
+  flex-shrink: 0;
+}
