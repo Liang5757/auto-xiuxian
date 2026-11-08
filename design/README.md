@@ -1,6 +1,6 @@
 # 当前界面设计
 
-当前截图位于 current/dispatch.png 与 current/clicker.png，来自 Electron + React 实际窗口。页面在 desktop/src/components/，就近样式在 index.module.scss。
+当前截图位于 current/dispatch.jpg 与 current/clicker.jpg，来自 Electron + React 实际窗口。页面在 desktop/src/components/，就近样式在 index.module.scss。
 
 默认内容尺寸为 800 × 540 逻辑像素。侧栏宽 156，内容留白 24，卡片间距 12～16，圆角 12。白色侧栏与卡片置于冷灰背景上。紫色只用于主要交互与选中态。标题 22，分区标题 14～15，正文 13，辅助信息 11～12。
 

@@ -12,13 +12,13 @@
 
 提供派遣开关、成功与失败次数、当前地图和运行记录。
 
-![修仙助手自动派遣页面](design/current/dispatch.png)
+![修仙助手自动派遣页面](design/current/dispatch.jpg)
 
 ### 连点器
 
 独立设置点击间隔、鼠标按键与启停热键。
 
-![修仙助手连点器页面](design/current/clicker.png)
+![修仙助手连点器页面](design/current/clicker.jpg)
 
 ## 下载与使用
 
