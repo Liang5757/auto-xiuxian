@@ -2,6 +2,10 @@
 
 Windows 桌面助手。Electron + React + TypeScript 负责界面，Rust 负责截图识别、自动派遣、连点和全局热键。
 
+## 下载与更新记录
+
+从 [GitHub Releases](https://github.com/Liang5757/auto-xiuxian/releases/latest) 下载 Windows x64 便携版 EXE。每个版本同时提供 SHA256SUMS.txt，完整历史见 [CHANGELOG.md](CHANGELOG.md)。仓库为私有，需要有仓库访问权限的 GitHub 账号。
+
 ## 目录
 
 ~~~text
@@ -62,3 +66,15 @@ npm run build
 JavaScript/TypeScript 函数行数由 scripts/check-functions.mjs 检查，Rust 由 workspace Clippy 配置约束，上限均为 200 行。命令校验集中在 desktop/electron/commands.cjs，进程通信与退出异常的回归测试在 desktop/electron/engine.test.cjs。
 
 飞剑祥云图标的设计说明位于 design/icon.md。
+
+
+## 发布新版本
+
+1. 同步根目录 package.json、desktop/package.json 和 xiuxian-rs/Cargo.toml 的版本号，并刷新 npm 与 Cargo 锁文件。
+2. 将 CHANGELOG.md 的未发布条目归档到对应版本，填写发布日期。
+3. 运行 npm run check，并用 node scripts/prepare-release.mjs vX.Y.Z --check 验证版本和更新记录。
+4. 提交到 main，再创建并推送 vX.Y.Z 标签。
+
+标签推送后，.github/workflows/release.yml 会在 Windows 上运行检查、构建便携版、生成 SHA-256、上传草稿并正式发布。Actions 页面也可手动选择已有标签重新运行。已正式发布的版本会拒绝覆盖，后续修复使用新版本号。
+
+本地构建后可运行 npm run release:prepare -- vX.Y.Z，生成 release/github/ 下的版本化 EXE、校验文件及发布说明。

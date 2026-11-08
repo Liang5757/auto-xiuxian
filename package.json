@@ -17,7 +17,8 @@
     "check:functions": "node scripts/check-functions.mjs",
     "format:check": "prettier --check \"desktop/src/**/*.{ts,tsx,scss}\" \"desktop/electron/*.cjs\" \"scripts/*.mjs\"",
     "test:desktop": "npm run build:engine && node --test desktop/electron/*.test.cjs",
-    "check": "npm run format:check && npm run check:functions && npm run typecheck && npm run check:engine && npm run test:engine && npm run test:desktop"
+    "check": "npm run format:check && npm run check:functions && npm run typecheck && npm run check:engine && npm run test:engine && npm run test:desktop",
+    "release:prepare": "node scripts/prepare-release.mjs"
   },
   "devDependencies": {
     "prettier": "^3.9.10"

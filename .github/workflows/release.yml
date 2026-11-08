@@ -1,0 +1,79 @@
+name: Windows release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '已存在的版本标签，例如 v0.2.0'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Validate version and changelog
+        run: node scripts/prepare-release.mjs "$env:RELEASE_TAG" --check
+
+      - name: Install the declared Rust toolchain
+        shell: pwsh
+        run: |
+          $match = Select-String -Path xiuxian-rs/rust-toolchain.toml -Pattern '^\s*channel\s*=\s*"([^"]+)"'
+          $toolchain = $match.Matches[0].Groups[1].Value
+          if (!$toolchain) { throw 'Rust toolchain version is missing' }
+          rustup toolchain install $toolchain --profile minimal --component clippy --component rustfmt
+
+      - run: npm ci
+      - run: npx --no-install install-electron
+      - run: npm run check
+      - run: npm run build
+
+      - name: Prepare executable, checksums and release notes
+        id: package
+        run: node scripts/prepare-release.mjs "$env:RELEASE_TAG"
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSET: ${{ steps.package.outputs.asset }}
+          SUMS: ${{ steps.package.outputs.sums }}
+          NOTES: ${{ steps.package.outputs.notes }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $existing = gh release view "$env:RELEASE_TAG" --repo "$env:GITHUB_REPOSITORY" --json isDraft 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            if (!($existing | ConvertFrom-Json).isDraft) {
+              throw 'This version is already published. Increment the version before releasing again.'
+            }
+            gh release upload "$env:RELEASE_TAG" "$env:ASSET" "$env:SUMS" --repo "$env:GITHUB_REPOSITORY" --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'Release asset upload failed' }
+            gh release edit "$env:RELEASE_TAG" --repo "$env:GITHUB_REPOSITORY" --notes-file "$env:NOTES"
+          } else {
+            gh release create "$env:RELEASE_TAG" "$env:ASSET" "$env:SUMS" --repo "$env:GITHUB_REPOSITORY" --verify-tag --draft --title "修仙助手 $env:RELEASE_TAG" --notes-file "$env:NOTES"
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed' }
+          gh release edit "$env:RELEASE_TAG" --repo "$env:GITHUB_REPOSITORY" --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }
