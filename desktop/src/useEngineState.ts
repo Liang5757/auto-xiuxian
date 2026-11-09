@@ -2,6 +2,17 @@ import { useEffect, useState } from 'react';
 import type { DesktopState } from './types';
 
 const initial: DesktopState = {
+  dispatchInterval: 30,
+  farm: {
+    interval: 30,
+    running: false,
+    stopping: false,
+    status: '连接中',
+    map: '待识别',
+    success: 0,
+    failure: 0,
+    logs: [],
+  },
   dispatchRunning: false,
   dispatchStopping: false,
   dispatchStatus: '连接中',

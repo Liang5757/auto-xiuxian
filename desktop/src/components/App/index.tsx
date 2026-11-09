@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import PollingInterval from '../PollingInterval';
 import Sidebar from '../Sidebar';
 import StatusCard from '../StatusCard';
 import DispatchPage from '../DispatchPage';
@@ -12,8 +13,13 @@ export default function App() {
   const [page, setPage] = useState<Page>('dispatch');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
-  const dispatch = page === 'dispatch';
-  const on = dispatch ? state.dispatchRunning : state.clicker.enabled;
+  const farming = page === 'farm';
+  const taskPage = page !== 'clicker';
+  const on = farming
+    ? state.farm.running
+    : taskPage
+      ? state.dispatchRunning
+      : state.clicker.enabled;
   const disabled = !ready || pending || state.closing || Boolean(state.backendError);
 
   async function perform(command: Command) {
@@ -33,12 +39,30 @@ export default function App() {
   }
   return (
     <div className={styles.app}>
-      <Sidebar page={page} onNavigate={setPage} connected={state.gameConnected} />
+      <Sidebar
+        page={page}
+        onNavigate={setPage}
+        connected={state.gameConnected}
+        bothOn={state.farm.running && state.dispatchRunning}
+        anyOn={state.farm.running || state.dispatchRunning}
+        disabled={disabled || state.dispatchStopping || state.farm.stopping}
+        toggleBoth={() =>
+          void perform({
+            type: state.farm.running || state.dispatchRunning ? 'stop_both' : 'start_both',
+          })
+        }
+      />
       <main className={styles.main}>
         <header className={styles.header}>
           <div>
-            <h1>{dispatch ? '自动派遣' : '连点器'}</h1>
-            <p>{dispatch ? '小队归来后，重新派遣并返回原地图' : '为游戏窗口设置连续点击'}</p>
+            <h1>{taskPage ? (farming ? '自动收种' : '自动派遣') : '连点器'}</h1>
+            <p>
+              {taskPage
+                ? farming
+                  ? '作物成熟后收获，补种高级灵谷并返回原地图'
+                  : '小队归来后，重新派遣并返回原地图'
+                : '为游戏窗口设置连续点击'}
+            </p>
           </div>
           <button onClick={() => window.assistant?.background()}>后台运行</button>
         </header>
@@ -49,19 +73,42 @@ export default function App() {
         )}
         <StatusCard
           on={on}
-          status={dispatch ? state.dispatchStatus : state.clicker.status}
-          detail={dispatch ? '检查间隔 30 秒' : '仅在鼠标指向游戏时点击'}
-          disabled={disabled || (dispatch && state.dispatchStopping)}
+          status={
+            farming ? state.farm.status : taskPage ? state.dispatchStatus : state.clicker.status
+          }
+          detail={
+            taskPage ? (
+              <PollingInterval
+                key={page}
+                value={farming ? state.farm.interval : state.dispatchInterval}
+                disabled={disabled}
+                onSave={(interval) => perform({ type: 'configure_polling', farming, interval })}
+              />
+            ) : (
+              '仅在鼠标指向游戏时点击'
+            )
+          }
+          disabled={
+            disabled || (farming ? state.farm.stopping : taskPage && state.dispatchStopping)
+          }
           onToggle={() =>
             void perform(
-              dispatch
-                ? { type: on ? 'stop_dispatch' : 'start_dispatch' }
+              taskPage
+                ? {
+                    type: farming
+                      ? on
+                        ? 'stop_farm'
+                        : 'start_farm'
+                      : on
+                        ? 'stop_dispatch'
+                        : 'start_dispatch',
+                  }
                 : { type: 'set_clicker', enabled: !on },
             )
           }
         />
-        {dispatch ? (
-          <DispatchPage state={state} />
+        {taskPage ? (
+          <DispatchPage state={farming ? state.farm : state} />
         ) : (
           <ClickerPage state={state} disabled={disabled} perform={perform} />
         )}

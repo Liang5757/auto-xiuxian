@@ -4,6 +4,17 @@ export interface LogEntry {
   message: string;
 }
 export interface Snapshot {
+  dispatchInterval: number;
+  farm: {
+    interval: number;
+    running: boolean;
+    stopping: boolean;
+    status: string;
+    map: string;
+    success: number;
+    failure: number;
+    logs: LogEntry[];
+  };
   dispatchRunning: boolean;
   dispatchStopping: boolean;
   dispatchStatus: string;
@@ -23,10 +34,19 @@ export interface Snapshot {
   };
 }
 export type Command =
-  | { type: 'start_dispatch' | 'stop_dispatch' }
+  | {
+      type:
+        | 'stop_both'
+        | 'start_both'
+        | 'stop_farm'
+        | 'start_farm'
+        | 'start_dispatch'
+        | 'stop_dispatch';
+    }
+  | { type: 'configure_polling'; farming: boolean; interval: number }
   | { type: 'set_clicker'; enabled: boolean }
   | { type: 'configure_clicker'; interval: number; right: boolean; key: number };
-export type Page = 'dispatch' | 'clicker';
+export type Page = 'farm' | 'dispatch' | 'clicker';
 export interface DesktopState extends Snapshot {
   backendError: string | null;
 }

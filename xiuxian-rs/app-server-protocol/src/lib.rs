@@ -9,6 +9,14 @@ pub struct Request {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
     StartDispatch,
+    StartFarm,
+    StartBoth,
+    StopBoth,
+    ConfigurePolling {
+        farming: bool,
+        interval: u64,
+    },
+    StopFarm,
     StopDispatch,
     SetClicker {
         enabled: bool,
@@ -38,7 +46,21 @@ pub struct ClickerState {
 }
 #[derive(Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct TaskState {
+    pub interval: u64,
+    pub running: bool,
+    pub stopping: bool,
+    pub status: String,
+    pub map: String,
+    pub success: u64,
+    pub failure: u64,
+    pub logs: Vec<LogEntry>,
+}
+#[derive(Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    pub dispatch_interval: u64,
+    pub farm: TaskState,
     pub dispatch_running: bool,
     pub dispatch_stopping: bool,
     pub dispatch_status: String,

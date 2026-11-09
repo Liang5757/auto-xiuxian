@@ -1,0 +1,17 @@
+.field {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  input {
+    width: 65px;
+    padding: 3px 5px;
+    border: 1px solid #dadee8;
+    border-radius: 5px;
+    color: #333a49;
+    font: inherit;
+  }
+  input[aria-invalid='true'] {
+    border-color: #b44b4b;
+  }
+}

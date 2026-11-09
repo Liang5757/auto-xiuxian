@@ -256,6 +256,100 @@ pub fn repeat_click(h: HWND, right: bool) -> Result<bool> {
     }
 }
 
+/// Locate the game-owned native popup and address items by their displayed text.
+fn popup_item(h: HWND, label: &str) -> Result<(HWND, HMENU, u32, usize, bool)> {
+    for _ in 0..15 {
+        for popup in owned(h) {
+            let mut class = [0; 32];
+            unsafe {
+                let len = GetClassNameW(popup, class.as_mut_ptr(), class.len() as i32);
+                if String::from_utf16_lossy(&class[..len as usize]) != "#32768" {
+                    continue;
+                }
+                let mut menu = 0;
+                // MN_GETHMENU returns the HMENU of this popup window.
+                if SendMessageTimeoutW(popup, 0x01e1, 0, 0, SMTO_ABORTIFHUNG, 250, &mut menu) == 0 {
+                    continue;
+                }
+                let menu = menu as HMENU;
+                for pos in 0..GetMenuItemCount(menu) {
+                    let mut title = [0; 96];
+                    let n = GetMenuStringW(menu, pos as u32, title.as_mut_ptr(), 96, MF_BYPOSITION);
+                    if !String::from_utf16_lossy(&title[..n as usize]).contains(label) {
+                        continue;
+                    }
+                    let preceding = (0..pos)
+                        .filter(|i| {
+                            GetMenuState(menu, *i as u32, MF_BYPOSITION) & MF_SEPARATOR == 0
+                        })
+                        .count();
+                    let enabled = GetMenuState(menu, pos as u32, MF_BYPOSITION)
+                        & (MF_DISABLED | MF_GRAYED)
+                        == 0;
+                    return Ok((popup, menu, pos as u32, preceding, enabled));
+                }
+            }
+        }
+        delay(100);
+    }
+    Err(format!("未找到游戏菜单项：{label}"))
+}
+
+fn select_menu_item(
+    popup: HWND,
+    menu: HMENU,
+    position: u32,
+    preceding: usize,
+    key: usize,
+) -> Result<()> {
+    // Menu navigation includes disabled entries but skips separators.
+    post(popup, WM_KEYDOWN, 0x24, 1)?;
+    for _ in 0..preceding {
+        post(popup, WM_KEYDOWN, 0x28, 1)?;
+    }
+    for _ in 0..10 {
+        let state = unsafe { GetMenuState(menu, position, MF_BYPOSITION) };
+        if state != u32::MAX && state & MF_HILITE != 0 && state & (MF_DISABLED | MF_GRAYED) == 0 {
+            return post(popup, WM_KEYDOWN, key, 1);
+        }
+        delay(50);
+    }
+    Err("未选中指定菜单项，已取消操作".into())
+}
+
+pub fn garden_menu(h: HWND, plant: bool) -> Result<bool> {
+    let action = || -> Result<bool> {
+        if plant {
+            let (popup, menu, position, preceding, enabled) = popup_item(h, "中种下")?;
+            if !enabled {
+                return Err("没有可播种的空坑".into());
+            }
+            select_menu_item(popup, menu, position, preceding, 0x27)?;
+        }
+        let label = if plant {
+            "种植高级灵谷"
+        } else {
+            "收获成熟作物"
+        };
+        let (popup, menu, position, preceding, enabled) = popup_item(h, label)?;
+        if !enabled {
+            if plant {
+                return Err("高级灵谷不可用".into());
+            }
+            return Ok(false);
+        }
+        select_menu_item(popup, menu, position, preceding, 0x0d)?;
+        delay(350);
+        Ok(true)
+    };
+    let result = action();
+    if !matches!(result, Ok(true)) {
+        post(h, WM_CANCELMODE, 0, 0)?;
+        delay(150);
+    }
+    result
+}
+
 #[cfg(test)]
 mod live {
     #[test]

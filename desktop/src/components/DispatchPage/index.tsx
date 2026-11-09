@@ -1,19 +1,23 @@
 import type { DesktopState } from '../../types';
 import styles from './index.module.scss';
 
-export default function DispatchPage({ state }: { state: DesktopState }) {
+export default function DispatchPage({
+  state,
+}: {
+  state: Pick<DesktopState, 'logs' | 'map' | 'success' | 'failure'>;
+}) {
   return (
     <>
       <div className={styles.metrics}>
         <section className={styles.metric}>
-          <span>派遣成功</span>
+          <span>任务成功</span>
           <i className={styles.success} aria-hidden="true">
             ✓
           </i>
           <strong>{state.success}</strong>
         </section>
         <section className={styles.metric}>
-          <span>派遣失败</span>
+          <span>任务失败</span>
           <i className={styles.failure} aria-hidden="true">
             !
           </i>
@@ -31,7 +35,7 @@ export default function DispatchPage({ state }: { state: DesktopState }) {
         <header>
           <h2>运行记录</h2>
           <span>
-            <kbd>Esc</kbd> 停止派遣
+            <kbd>Esc</kbd> 停止派遣和收种
           </span>
         </header>
         {state.logs.length === 0 ? (

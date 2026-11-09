@@ -6,3 +6,4 @@
 - 发布版本同步根目录 package.json、desktop/package.json、Rust workspace 及锁文件。
 - 正式发布使用 vX.Y.Z 标签，GitHub Release 提供 Windows x64 EXE、SHA256SUMS.txt 和对应更新记录。
 - 已发布版本保持可追溯，修复以新版本发布。可执行文件通过 Release 分发，构建输出由 .gitignore 排除。
+- 每次完成 Windows 打包后，将最新版便携包复制到项目根目录，命名为 修仙助手.exe，并核对 SHA-256。

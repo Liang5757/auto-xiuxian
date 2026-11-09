@@ -1,92 +1,62 @@
-use std::{
-    collections::VecDeque,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-        mpsc,
-    },
+use crate::task::Task;
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
 };
-use xiuxian_app_server_protocol::{ClickerState, Command, LogEntry, Snapshot};
-use xiuxian_core::{
-    clicker, native,
-    session::{Event, Session},
-};
+use xiuxian_app_server_protocol::{ClickerState, Command, Snapshot};
+use xiuxian_core::{clicker, native};
 pub(crate) struct Engine {
-    stop: Arc<AtomicBool>,
-    busy: Arc<Mutex<()>>,
-    tx: mpsc::Sender<Event>,
-    rx: mpsc::Receiver<Event>,
+    dispatch: Task,
+    farm: Task,
+    escape: Arc<AtomicBool>,
     clicker: clicker::Clicker,
-    running: bool,
-    stopping: bool,
-    closing: bool,
-    status: String,
-    map: String,
-    success: u64,
-    failure: u64,
     connected: bool,
-    logs: VecDeque<LogEntry>,
-    log_id: u64,
+    closing: bool,
 }
 impl Engine {
     pub(crate) fn new() -> Self {
-        let stop = Arc::new(AtomicBool::new(false));
         let busy = Arc::new(Mutex::new(()));
-        let (tx, rx) = mpsc::channel();
+        let escape = Arc::new(AtomicBool::new(false));
         Self {
-            clicker: clicker::Clicker::new(busy.clone(), stop.clone()),
-            stop,
-            busy,
-            tx,
-            rx,
-            running: false,
-            stopping: false,
-            closing: false,
-            status: "已停止".into(),
-            map: "待识别".into(),
-            success: 0,
-            failure: 0,
+            dispatch: Task::new(false, busy.clone()),
+            farm: Task::new(true, busy.clone()),
+            clicker: clicker::Clicker::new(busy, escape.clone()),
+            escape,
             connected: false,
-            logs: VecDeque::new(),
-            log_id: 0,
+            closing: false,
         }
-    }
-    fn log(&mut self, message: String) {
-        let mut t = unsafe { std::mem::zeroed() };
-        unsafe { windows_sys::Win32::System::SystemInformation::GetLocalTime(&mut t) };
-        self.log_id += 1;
-        self.logs.push_front(LogEntry {
-            id: self.log_id,
-            time: format!("{:02}:{:02}:{:02}", t.wHour, t.wMinute, t.wSecond),
-            message,
-        });
-        self.logs.truncate(100);
     }
     pub(crate) fn command(&mut self, command: Command) -> Result<(), String> {
         if self.closing && !matches!(command, Command::Shutdown) {
             return Err("正在退出".into());
         }
         match command {
-            Command::StartDispatch => {
-                if self.stopping {
-                    return Err("请等待本轮操作停止".into());
+            Command::StartBoth => {
+                if self.dispatch.stopping || self.farm.stopping {
+                    return Err("请等待当前操作停止".into());
                 }
-                if !self.running {
-                    self.stop.store(false, Ordering::Relaxed);
-                    self.running = true;
-                    self.status = "正在监听".into();
-                    self.log("立即检查小队返回提示".into());
-                    let job = Session::new(self.stop.clone(), self.tx.clone(), self.busy.clone());
-                    std::thread::spawn(move || job.run());
-                }
+                self.dispatch.start()?;
+                self.farm.start()?;
             }
-            Command::StopDispatch => {
-                if self.running {
-                    self.stopping = true;
-                    self.status = "正在停止".into();
-                    self.stop.store(true, Ordering::Relaxed);
-                }
+            Command::StopBoth => {
+                self.dispatch.stop();
+                self.farm.stop();
             }
+            Command::ConfigurePolling { farming, interval } => {
+                if !(1..=86400).contains(&interval) {
+                    return Err("检测间隔应为 1～86400 s 的整数".into());
+                }
+                let task = if farming {
+                    &mut self.farm
+                } else {
+                    &mut self.dispatch
+                };
+                task.interval.store(interval, Ordering::Relaxed);
+            }
+            Command::StartFarm => self.farm.start()?,
+            Command::StartDispatch => self.dispatch.start()?,
+            Command::StopFarm => self.farm.stop(),
+            Command::StopDispatch => self.dispatch.stop(),
             Command::SetClicker { enabled } => {
                 self.clicker.enabled.store(enabled, Ordering::Relaxed);
                 *self.clicker.status.lock().unwrap() = if enabled {
@@ -118,30 +88,12 @@ impl Engine {
         Ok(())
     }
     pub(crate) fn poll(&mut self) {
-        while let Ok(event) = self.rx.try_recv() {
-            match event {
-                Event::State(s) => {
-                    if !self.stopping && !self.closing {
-                        self.status = s;
-                    }
-                }
-                Event::Map(s) => self.map = s,
-                Event::Log(s) => self.log(s),
-                Event::Success(n) => {
-                    self.success += 1;
-                    self.log(format!("本轮成功，重新派遣 {n} 支小队"));
-                }
-                Event::Failure(s) => {
-                    self.failure += 1;
-                    self.log(s);
-                }
-                Event::Stopped => {
-                    self.running = false;
-                    self.stopping = false;
-                    self.status = "已停止".into();
-                }
-            }
+        if self.escape.swap(false, Ordering::Relaxed) {
+            self.dispatch.stop();
+            self.farm.stop();
         }
+        self.dispatch.poll();
+        self.farm.poll();
     }
     pub(crate) fn scan_game(&mut self) {
         self.connected = native::game().ok().flatten().is_some();
@@ -153,23 +105,25 @@ impl Engine {
         }
         self.closing = true;
         self.clicker.stop();
-        self.stop.store(true, Ordering::Relaxed);
-        self.status = "完成当前操作后退出".into();
+        self.dispatch.stop();
+        self.farm.stop();
     }
 
     pub(crate) fn is_finished(&self) -> bool {
-        self.closing && !self.running
+        self.closing && !self.dispatch.running && !self.farm.running
     }
 
     pub(crate) fn snapshot(&self) -> Snapshot {
         let settings = *self.clicker.settings.lock().unwrap();
         Snapshot {
-            dispatch_running: self.running,
-            dispatch_stopping: self.stopping,
-            dispatch_status: self.status.clone(),
-            map: self.map.clone(),
-            success: self.success,
-            failure: self.failure,
+            dispatch_interval: self.dispatch.interval.load(Ordering::Relaxed),
+            farm: self.farm.snapshot(),
+            dispatch_running: self.dispatch.running,
+            dispatch_stopping: self.dispatch.stopping,
+            dispatch_status: self.dispatch.status.clone(),
+            map: self.dispatch.map.clone(),
+            success: self.dispatch.success,
+            failure: self.dispatch.failure,
             game_connected: self.connected,
             clicker: ClickerState {
                 enabled: self.clicker.enabled.load(Ordering::Relaxed),
@@ -179,8 +133,61 @@ impl Engine {
                 right: settings.right,
                 key: settings.key,
             },
-            logs: self.logs.iter().cloned().collect(),
+            logs: self.dispatch.logs.iter().cloned().collect(),
             closing: self.closing,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn master_switch_stops_both_and_polling_intervals_are_independent() {
+        let busy = Arc::new(Mutex::new(()));
+        let guard = busy.lock().unwrap();
+        let mut engine = Engine::new();
+        engine.dispatch = Task::new(false, busy.clone());
+        engine.farm = Task::new(true, busy.clone());
+        engine
+            .command(Command::ConfigurePolling {
+                farming: false,
+                interval: 5,
+            })
+            .unwrap();
+        engine
+            .command(Command::ConfigurePolling {
+                farming: true,
+                interval: 60,
+            })
+            .unwrap();
+        assert_eq!(engine.snapshot().dispatch_interval, 5);
+        assert_eq!(engine.snapshot().farm.interval, 60);
+        for interval in [0, 86401] {
+            assert!(
+                engine
+                    .command(Command::ConfigurePolling {
+                        farming: true,
+                        interval
+                    })
+                    .is_err()
+            );
+        }
+        assert_eq!(engine.snapshot().farm.interval, 60);
+        engine.command(Command::StartBoth).unwrap();
+        engine.command(Command::StartBoth).unwrap();
+        assert!(engine.snapshot().farm.running && engine.snapshot().dispatch_running);
+        engine.command(Command::StopBoth).unwrap();
+        assert!(engine.snapshot().farm.stopping && engine.snapshot().dispatch_stopping);
+        drop(guard);
+        engine.shutdown();
+        for _ in 0..100 {
+            engine.poll();
+            if engine.is_finished() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        panic!("停止后工作线程未退出");
     }
 }

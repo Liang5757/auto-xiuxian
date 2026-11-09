@@ -95,7 +95,13 @@ impl Refs {
             "petpanel",
             "safe",
             "travel",
-            "world"
+            "world",
+            "ripe_notice",
+            "garden",
+            "cave",
+            "plot_empty",
+            "quick",
+            "growing"
         );
         Self(map)
     }

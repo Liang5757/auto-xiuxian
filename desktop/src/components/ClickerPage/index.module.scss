@@ -57,6 +57,9 @@
     border: 0;
     background: transparent;
     color: #222631;
+    &[aria-invalid='true'] {
+      outline: 1px solid #b44b4b;
+    }
   }
 }
 .choices {

@@ -5,7 +5,7 @@ use crate::{
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::Sender,
     },
     time::Duration,
@@ -22,6 +22,9 @@ pub struct Session {
     pub stop: Arc<AtomicBool>,
     pub tx: Sender<Event>,
     pub busy: Arc<std::sync::Mutex<()>>,
+    pub farming: bool,
+    pub interval: Arc<AtomicU64>,
+    needs_planting: bool,
     refs: Refs,
     homes: Vec<(Template, (i32, i32))>,
     return_map: Option<ReturnMap>,
@@ -37,6 +40,9 @@ impl Session {
             stop,
             tx,
             busy,
+            farming: false,
+            interval: Arc::new(AtomicU64::new(30)),
+            needs_planting: false,
             refs: Refs::load(),
             homes: vec![],
             return_map: None,
@@ -114,14 +120,27 @@ impl Session {
         if initial && !battle {
             return Err("请在原挂机地图的战斗页启动".into());
         }
-        if !battle || !self.refs.returned(&f) {
+        let ready = if self.farming {
+            self.needs_planting
+                || (0..5).any(|i| self.refs.has(&f, "ripe_notice", 1098, 215 + i * 30))
+        } else {
+            self.refs.returned(&f)
+        };
+        if !battle || !ready {
             if initial {
-                self.log("未发现返回提示，继续监听")
+                self.log("未发现任务提示，继续监听")
             }
             return Ok(0);
         }
-        self.emit(Event::State("正在派遣".into()));
-        if !self.refs.has(&f, "petpanel", 1344, 93) {
+        self.emit(Event::State(
+            if self.farming {
+                "正在收种"
+            } else {
+                "正在派遣"
+            }
+            .into(),
+        ));
+        if !self.farming && !self.refs.has(&f, "petpanel", 1344, 93) {
             win::click(h, 1430, 73, false)?;
             self.wait_key(h, "petpanel", 1344, 93, "宠物栏未打开")?;
         }
@@ -167,6 +186,11 @@ impl Session {
                 name: name.into(),
             });
         }
+        if self.farming {
+            let result = self.farm(h);
+            self.restore_home(h)?;
+            return result;
+        }
         win::click(h, 363, 457, false)?;
         self.wait_key(h, "expedition", 42, 58, "未进入蛮荒之地")?;
         self.emit(Event::Map("蛮荒之地".into()));
@@ -183,6 +207,50 @@ impl Session {
             return Err("返回提示与队伍状态不一致".into());
         }
         Ok(count)
+    }
+    fn farm(&mut self, h: isize) -> Result<usize> {
+        win::click(h, 729, 774, false)?;
+        self.wait_key(h, "cave", 40, 60, "未进入洞府聚灵阵")?;
+        win::click(h, 1140, 654, false)?;
+        self.wait_key(h, "garden", 40, 60, "未进入灵植园")?;
+        self.emit(Event::Map("灵植园".into()));
+        let empty = |f: &Frame| -> Vec<_> {
+            (0..9)
+                .filter(|i| {
+                    self.refs
+                        .has(f, "plot_empty", 175 + i % 3 * 345, 145 + i / 3 * 98)
+                })
+                .collect()
+        };
+        self.wait_key(h, "quick", 784, 433, "未找到快捷种植按钮")?;
+        win::click(h, 850, 447, false)?;
+        let harvested = win::garden_menu(h, false)?;
+        if !harvested && empty(&self.frame(h)?).is_empty() {
+            self.needs_planting = false;
+            return Ok(0);
+        }
+        let frame = self.wait(h, |f| !empty(f).is_empty(), "未检测到可播种的空坑")?;
+        let plots = empty(&frame);
+        self.needs_planting = true;
+        win::click(h, 850, 447, false)?;
+        win::garden_menu(h, true)?;
+        self.wait(
+            h,
+            |f| {
+                plots.iter().all(|i| {
+                    self.refs
+                        .has(f, "growing", 111 + i % 3 * 345, 152 + i / 3 * 98)
+                })
+            },
+            "未确认全部空坑已种下作物",
+        )?;
+        self.needs_planting = false;
+        self.log(if harvested {
+            "已收获成熟作物并补种高级灵谷"
+        } else {
+            "已为空坑补种高级灵谷"
+        });
+        Ok(plots.len())
     }
     fn restore_home(&mut self, h: isize) -> Result<()> {
         let Some(home) = self.return_map.as_ref() else {
@@ -235,7 +303,16 @@ impl Session {
             return Ok(None);
         };
         let lock = self.busy.clone();
-        let _guard = lock.lock().unwrap();
+        let _guard = loop {
+            if self.stop.load(Ordering::Relaxed) {
+                return Ok(Some(0));
+            }
+            match lock.try_lock() {
+                Ok(guard) => break guard,
+                Err(std::sync::TryLockError::WouldBlock) => win::delay(100),
+                Err(std::sync::TryLockError::Poisoned(_)) => return Err("游戏操作锁异常".into()),
+            }
+        };
         self.round(h, initial).map(Some)
     }
     fn run_loop(
@@ -269,23 +346,30 @@ impl Session {
                         break;
                     }
                     self.emit(Event::Failure(e));
-                    self.emit(Event::State("本轮失败，30 秒后重试".into()));
+                    self.emit(Event::State("本轮失败，等待重试".into()));
                 }
             }
             if self.stop.load(Ordering::Relaxed) {
                 break;
             }
             waiting = false;
-            pause(self, 30)
+            pause(self, 0) // Use the configurable polling interval.
         }
         self.emit(Event::Stopped)
     }
     fn pause(&self, secs: u32) {
-        for _ in 0..secs * 10 {
-            if self.stop.load(Ordering::Relaxed) {
+        let mut elapsed = 0;
+        loop {
+            let limit = if secs == 0 {
+                self.interval.load(Ordering::Relaxed)
+            } else {
+                secs as u64
+            };
+            if elapsed >= limit * 10 || self.stop.load(Ordering::Relaxed) {
                 break;
             }
-            std::thread::sleep(Duration::from_millis(100))
+            std::thread::sleep(Duration::from_millis(100));
+            elapsed += 1;
         }
     }
 }
@@ -321,7 +405,7 @@ mod tests {
         );
         let events: Vec<_> = rx.try_iter().collect();
         assert_eq!(checks, 6);
-        assert_eq!(pauses, [30, 30, 30, 2, 30]);
+        assert_eq!(pauses, [0, 0, 0, 2, 0]);
         assert_eq!(
             events
                 .iter()
@@ -356,7 +440,7 @@ mod tests {
                 Err("模拟失败".into())
             },
             |job, seconds| {
-                assert_eq!(seconds, 30);
+                assert_eq!(seconds, 0);
                 job.stop.store(true, Ordering::Relaxed);
             },
         );

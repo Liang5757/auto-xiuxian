@@ -1,11 +1,13 @@
 const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, dialog } = require('electron');
 const path = require('node:path');
+const { Settings } = require('./settings.cjs');
 const { Engine } = require('./engine.cjs');
 const { validate } = require('./commands.cjs');
 
 let window;
 let tray;
 let engine;
+let settings;
 let quitting = false;
 let state = { backendError: null };
 
@@ -23,6 +25,7 @@ async function quit() {
   if (quitting) return;
   quitting = true;
   try {
+    if (settings) await settings.pending;
     if (engine) await engine.stop();
     tray?.destroy();
     app.exit(0);
@@ -45,7 +48,7 @@ else {
   app.on('window-all-closed', () => {});
   app
     .whenReady()
-    .then(() => {
+    .then(async () => {
       app.setAppUserModelId('com.liang.xiuxian');
       const iconPath = path.join(app.getAppPath(), 'assets/app.ico');
       window = new BrowserWindow({
@@ -97,6 +100,8 @@ else {
       );
       tray.on('double-click', restore);
 
+      settings = new Settings(path.join(app.getPath('userData'), 'settings.json'));
+      await settings.load();
       engine = new Engine(app, publish, (error) => {
         state = {
           ...state,
@@ -105,14 +110,17 @@ else {
           dispatchStopping: false,
           dispatchStatus: '后台进程不可用',
         };
+        if (state.farm)
+          state.farm = { ...state.farm, running: false, stopping: false, status: '后台进程不可用' };
         if (state.clicker) state.clicker = { ...state.clicker, enabled: false, status: '已停止' };
         if (window && !window.isDestroyed()) window.webContents.send('assistant:state', state);
       });
+      for (const command of settings.commands) await engine.command(command);
       ipcMain.handle('assistant:get-state', () => state);
       ipcMain.handle('assistant:command', async (_event, command) => {
         try {
           if (state.backendError) throw new Error(state.backendError);
-          await engine.command(validate(command));
+          await settings.apply(engine, validate(command));
           return { ok: true };
         } catch (error) {
           return { ok: false, error: error.message };
