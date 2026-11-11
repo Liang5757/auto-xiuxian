@@ -4,6 +4,11 @@
 
 ## [未发布]
 
+## [0.3.1] - 2026-11-12
+
+- 修复自动收种原生菜单选中失败：按菜单文字定位后直接选中对应位置，核对高亮及可用状态后执行收获和补种。
+- 菜单状态改用独立字段读取，避免子菜单项数量与状态标志混用，并新增回归测试和实机收种测试入口。
+
 ## [0.3.0] - 2026-11-10
 
 - 新增自动收种，识别成熟提示后进入灵植园收获成熟作物，为全部空坑补种高级灵谷并返回原挂机地图。
@@ -44,6 +49,7 @@
 - 游戏最小化时会短暂还原检查，再重新最小化。
 - 关闭窗口会隐藏到托盘，从托盘选择“退出”或在窗口中按 Ctrl+Q 可完全退出。
 
-[未发布]: https://github.com/Liang5757/auto-xiuxian/compare/v0.3.0...main
+[未发布]: https://github.com/Liang5757/auto-xiuxian/compare/v0.3.1...main
+[0.3.1]: https://github.com/Liang5757/auto-xiuxian/releases/tag/v0.3.1
 [0.3.0]: https://github.com/Liang5757/auto-xiuxian/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Liang5757/auto-xiuxian/releases/tag/v0.2.0

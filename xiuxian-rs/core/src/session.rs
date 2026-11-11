@@ -457,11 +457,22 @@ mod live {
     #[test]
     #[ignore = "operates the live game; requires the origin battle map"]
     fn inspect_origin_once() {
+        inspect_origin(false);
+    }
+
+    #[test]
+    #[ignore = "operates the live game; requires ripe crops on the origin battle map"]
+    fn farm_origin_once() {
+        inspect_origin(true);
+    }
+
+    fn inspect_origin(farming: bool) {
         unsafe {
             windows_sys::Win32::UI::HiDpi::SetThreadDpiAwarenessContext(-4);
         }
         let (tx, rx) = std::sync::mpsc::channel();
         let mut job = Session::new(Default::default(), tx, Default::default());
+        job.farming = farming;
         let h = win::game().unwrap().unwrap();
         let mini = win::minimized(h);
         let result = (|| -> Result<usize> {
@@ -473,7 +484,14 @@ mod live {
             if !job.refs.has(&f, "origin", 675, 122) {
                 return Err("实机测试需要时空原点".into());
             }
-            job.inspect(h, true)
+            let count = job.inspect(h, true)?;
+            if farming {
+                let frame = job.frame(h)?;
+                if !job.refs.has(&frame, "origin", 675, 122) {
+                    return Err("实机测试结束后未回到时空原点".into());
+                }
+            }
+            Ok(count)
         })();
         if mini {
             win::minimize(h, true).unwrap();
@@ -484,6 +502,10 @@ mod live {
             }
         }
         println!("round: {result:?}");
-        result.unwrap();
+        let count = result.unwrap();
+        if farming {
+            assert!(count > 0, "实机测试未执行收种，需准备成熟作物或空坑");
+            assert!(job.return_map.is_none());
+        }
     }
 }

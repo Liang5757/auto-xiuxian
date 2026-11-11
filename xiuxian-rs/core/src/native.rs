@@ -256,8 +256,22 @@ pub fn repeat_click(h: HWND, right: bool) -> Result<bool> {
     }
 }
 
+// Private native-menu messages, guarded by state checks before activation.
+const MN_GETHMENU: u32 = 0x01e1;
+const MN_SELECTITEM: u32 = 0x01e5;
+
+fn menu_state(menu: HMENU, position: u32) -> Result<u32> {
+    let mut item = unsafe { zeroed::<MENUITEMINFOW>() };
+    item.cbSize = size_of::<MENUITEMINFOW>() as u32;
+    item.fMask = MIIM_STATE;
+    if unsafe { GetMenuItemInfoW(menu, position, 1, &mut item) } == 0 {
+        return Err("无法读取菜单项状态，已取消操作".into());
+    }
+    Ok(item.fState)
+}
+
 /// Locate the game-owned native popup and address items by their displayed text.
-fn popup_item(h: HWND, label: &str) -> Result<(HWND, HMENU, u32, usize, bool)> {
+fn popup_item(h: HWND, label: &str) -> Result<(HWND, HMENU, u32, bool)> {
     for _ in 0..15 {
         for popup in owned(h) {
             let mut class = [0; 32];
@@ -268,7 +282,9 @@ fn popup_item(h: HWND, label: &str) -> Result<(HWND, HMENU, u32, usize, bool)> {
                 }
                 let mut menu = 0;
                 // MN_GETHMENU returns the HMENU of this popup window.
-                if SendMessageTimeoutW(popup, 0x01e1, 0, 0, SMTO_ABORTIFHUNG, 250, &mut menu) == 0 {
+                if SendMessageTimeoutW(popup, MN_GETHMENU, 0, 0, SMTO_ABORTIFHUNG, 250, &mut menu)
+                    == 0
+                {
                     continue;
                 }
                 let menu = menu as HMENU;
@@ -278,15 +294,8 @@ fn popup_item(h: HWND, label: &str) -> Result<(HWND, HMENU, u32, usize, bool)> {
                     if !String::from_utf16_lossy(&title[..n as usize]).contains(label) {
                         continue;
                     }
-                    let preceding = (0..pos)
-                        .filter(|i| {
-                            GetMenuState(menu, *i as u32, MF_BYPOSITION) & MF_SEPARATOR == 0
-                        })
-                        .count();
-                    let enabled = GetMenuState(menu, pos as u32, MF_BYPOSITION)
-                        & (MF_DISABLED | MF_GRAYED)
-                        == 0;
-                    return Ok((popup, menu, pos as u32, preceding, enabled));
+                    let enabled = menu_state(menu, pos as u32)? & (MF_DISABLED | MF_GRAYED) == 0;
+                    return Ok((popup, menu, pos as u32, enabled));
                 }
             }
         }
@@ -295,21 +304,12 @@ fn popup_item(h: HWND, label: &str) -> Result<(HWND, HMENU, u32, usize, bool)> {
     Err(format!("未找到游戏菜单项：{label}"))
 }
 
-fn select_menu_item(
-    popup: HWND,
-    menu: HMENU,
-    position: u32,
-    preceding: usize,
-    key: usize,
-) -> Result<()> {
-    // Menu navigation includes disabled entries but skips separators.
-    post(popup, WM_KEYDOWN, 0x24, 1)?;
-    for _ in 0..preceding {
-        post(popup, WM_KEYDOWN, 0x28, 1)?;
-    }
+fn select_menu_item(popup: HWND, menu: HMENU, position: u32, key: usize) -> Result<()> {
+    // MN_SELECTITEM selects the exact position in a native popup.
+    post(popup, MN_SELECTITEM, position as usize, 0)?;
     for _ in 0..10 {
-        let state = unsafe { GetMenuState(menu, position, MF_BYPOSITION) };
-        if state != u32::MAX && state & MF_HILITE != 0 && state & (MF_DISABLED | MF_GRAYED) == 0 {
+        let state = menu_state(menu, position)?;
+        if state & MF_HILITE != 0 && state & (MF_DISABLED | MF_GRAYED) == 0 {
             return post(popup, WM_KEYDOWN, key, 1);
         }
         delay(50);
@@ -320,25 +320,25 @@ fn select_menu_item(
 pub fn garden_menu(h: HWND, plant: bool) -> Result<bool> {
     let action = || -> Result<bool> {
         if plant {
-            let (popup, menu, position, preceding, enabled) = popup_item(h, "中种下")?;
+            let (popup, menu, position, enabled) = popup_item(h, "中种下")?;
             if !enabled {
                 return Err("没有可播种的空坑".into());
             }
-            select_menu_item(popup, menu, position, preceding, 0x27)?;
+            select_menu_item(popup, menu, position, 0x27)?;
         }
         let label = if plant {
             "种植高级灵谷"
         } else {
             "收获成熟作物"
         };
-        let (popup, menu, position, preceding, enabled) = popup_item(h, label)?;
+        let (popup, menu, position, enabled) = popup_item(h, label)?;
         if !enabled {
             if plant {
                 return Err("高级灵谷不可用".into());
             }
             return Ok(false);
         }
-        select_menu_item(popup, menu, position, preceding, 0x0d)?;
+        select_menu_item(popup, menu, position, 0x0d)?;
         delay(350);
         Ok(true)
     };
@@ -348,6 +348,37 @@ pub fn garden_menu(h: HWND, plant: bool) -> Result<bool> {
         delay(150);
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn submenu_count_does_not_leak_into_item_state() {
+        unsafe {
+            let menu = CreatePopupMenu();
+            let submenu = CreatePopupMenu();
+            assert_ne!(menu, 0);
+            assert_ne!(submenu, 0);
+            let label = [65u16, 0];
+            for id in 1..=8 {
+                assert_ne!(AppendMenuW(submenu, MF_STRING, id, label.as_ptr()), 0);
+            }
+            assert_ne!(
+                AppendMenuW(menu, MF_POPUP, submenu as usize, label.as_ptr()),
+                0
+            );
+            // Legacy API encodes the count in the high byte, overlapping MF_SEPARATOR.
+            assert_ne!(GetMenuState(menu, 0, MF_BYPOSITION) & MF_SEPARATOR, 0);
+            let state = menu_state(menu, 0).unwrap();
+            assert_eq!(state & (MF_HILITE | MF_DISABLED | MF_GRAYED), 0);
+            assert_ne!(EnableMenuItem(menu, 0, MF_BYPOSITION | MF_GRAYED), -1);
+            assert_ne!(menu_state(menu, 0).unwrap() & MF_GRAYED, 0);
+            assert!(menu_state(menu, 1).is_err());
+            assert_ne!(DestroyMenu(menu), 0);
+        }
+    }
 }
 
 #[cfg(test)]
