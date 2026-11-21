@@ -1,4 +1,5 @@
 import Toggle from '../Toggle';
+import Icon from '../Icon';
 import logo from '../../../assets/app.png';
 import type { Page } from '../../types';
 import styles from './index.module.scss';
@@ -33,8 +34,8 @@ export default function Sidebar({
           onClick={() => onNavigate('dispatch')}
           aria-current={page === 'dispatch' ? 'page' : undefined}
         >
-          <span aria-hidden="true" className={styles.plane}>
-            ➤
+          <span className={styles.icon}>
+            <Icon name="dispatch" />
           </span>
           自动派遣
         </button>
@@ -43,8 +44,8 @@ export default function Sidebar({
           onClick={() => onNavigate('farm')}
           aria-current={page === 'farm' ? 'page' : undefined}
         >
-          <span aria-hidden="true" className={styles.crop}>
-            ✿
+          <span className={styles.icon}>
+            <Icon name="farm" />
           </span>
           自动收种
         </button>
@@ -53,10 +54,20 @@ export default function Sidebar({
           onClick={() => onNavigate('clicker')}
           aria-current={page === 'clicker' ? 'page' : undefined}
         >
-          <span aria-hidden="true" className={styles.cursor}>
-            ↖
+          <span className={styles.icon}>
+            <Icon name="clicker" />
           </span>
           连点器
+        </button>
+        <button
+          className={page === 'speed' ? styles.active : ''}
+          onClick={() => onNavigate('speed')}
+          aria-current={page === 'speed' ? 'page' : undefined}
+        >
+          <span className={styles.icon}>
+            <Icon name="speed" />
+          </span>
+          游戏变速
         </button>
       </nav>
       <div className={styles.connection}>

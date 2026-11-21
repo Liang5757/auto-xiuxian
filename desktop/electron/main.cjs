@@ -3,16 +3,18 @@ const path = require('node:path');
 const { Settings } = require('./settings.cjs');
 const { Engine } = require('./engine.cjs');
 const { validate } = require('./commands.cjs');
+const { Speedy } = require('./speedy.cjs');
 
 let window;
 let tray;
 let engine;
 let settings;
+let speedy;
 let quitting = false;
 let state = { backendError: null };
 
 function publish(update) {
-  state = { ...update, backendError: state.backendError };
+  state = { ...update, backendError: state.backendError, speed: speedy?.state };
   if (window && !window.isDestroyed()) window.webContents.send('assistant:state', state);
 }
 function restore() {
@@ -26,6 +28,7 @@ async function quit() {
   quitting = true;
   try {
     if (settings) await settings.pending;
+    if (speedy) await speedy.stop();
     if (engine) await engine.stop();
     tray?.destroy();
     app.exit(0);
@@ -102,6 +105,26 @@ else {
 
       settings = new Settings(path.join(app.getPath('userData'), 'settings.json'));
       await settings.load();
+      speedy = new Speedy(
+        path.join(app.getPath('userData'), 'speedy.json'),
+        app.isPackaged
+          ? path.join(process.resourcesPath, 'native-speed')
+          : path.join(__dirname, '../resources/native-speed'),
+        (speed) => {
+          state = { ...state, speed };
+          if (!window.isDestroyed()) window.webContents.send('assistant:state', state);
+        },
+      );
+      await speedy.load();
+      ipcMain.handle('assistant:speed', async (_event, request) => {
+        try {
+          if (quitting) throw new Error('应用正在退出');
+          if (!request || typeof request !== 'object') throw new Error('无效变速请求');
+          return { ok: true, state: await speedy.set(request.enabled, request.factor) };
+        } catch (error) {
+          return { ok: false, error: error.message };
+        }
+      });
       engine = new Engine(app, publish, (error) => {
         state = {
           ...state,

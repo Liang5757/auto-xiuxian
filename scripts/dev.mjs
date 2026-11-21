@@ -3,6 +3,14 @@ import { createRequire } from 'node:module';
 import { createServer } from 'vite';
 import { fileURLToPath } from 'node:url';
 
+execFileSync(
+  'powershell',
+  ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'scripts/build-speed.ps1'],
+  {
+    stdio: 'inherit',
+    cwd: fileURLToPath(new URL('../', import.meta.url)),
+  },
+);
 execFileSync('cargo', ['build', '--locked', '--release'], {
   stdio: 'inherit',
   cwd: fileURLToPath(new URL('../xiuxian-rs', import.meta.url)),

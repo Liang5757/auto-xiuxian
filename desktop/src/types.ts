@@ -46,11 +46,18 @@ export type Command =
   | { type: 'configure_polling'; farming: boolean; interval: number }
   | { type: 'set_clicker'; enabled: boolean }
   | { type: 'configure_clicker'; interval: number; right: boolean; key: number };
-export type Page = 'farm' | 'dispatch' | 'clicker';
+export type Page = 'farm' | 'dispatch' | 'clicker' | 'speed';
+export interface SpeedState {
+  factor: number;
+  enabled: boolean;
+  status: string;
+}
 export interface DesktopState extends Snapshot {
+  speed?: SpeedState;
   backendError: string | null;
 }
 export interface DesktopApi {
+  speed(request: { enabled: boolean; factor: number }): Promise<{ ok: boolean; error?: string }>;
   getState(): Promise<Partial<DesktopState>>;
   command(command: Command): Promise<{ ok: boolean; error?: string }>;
   background(): void;

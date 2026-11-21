@@ -19,8 +19,11 @@
   color: #7155e0;
   display: grid;
   place-items: center;
-  font-size: 24px;
-  font-weight: 300;
+  svg {
+    display: block;
+    width: 24px;
+    height: 24px;
+  }
   &[data-on='true'] {
     background: #ebf7f1;
     color: #2e9976;

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import Toggle from '../Toggle';
+import Icon from '../Icon';
 import styles from './index.module.scss';
 
 interface Props {
@@ -13,7 +14,7 @@ export default function StatusCard({ on, status, detail, disabled, onToggle }: P
   return (
     <section className={styles.card} aria-label="运行状态">
       <span className={styles.power} data-on={on} aria-hidden="true">
-        ⏻
+        <Icon name="power" />
       </span>
       <div className={styles.description}>
         <h2 aria-live="polite">{status}</h2>

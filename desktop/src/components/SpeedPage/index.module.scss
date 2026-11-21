@@ -1,0 +1,61 @@
+.settings {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: white;
+  border: 1px solid #e7eaf0;
+  border-radius: 12px;
+  header {
+    display: flex;
+    justify-content: space-between;
+    padding: 18px 22px;
+    border-bottom: 1px solid #e7eaf0;
+    span {
+      font-size: 11px;
+      color: #848b9b;
+    }
+  }
+  fieldset {
+    border: 0;
+    padding: 20px 22px;
+    margin: 0;
+    display: grid;
+    gap: 18px;
+  }
+  button {
+    background: #f1edfd;
+    color: #7155e0;
+    border: 0;
+    border-radius: 6px;
+    padding: 8px 12px;
+  }
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  input {
+    width: 80px;
+    padding: 8px;
+    border: 1px solid #e7eaf0;
+    border-radius: 6px;
+  }
+}
+.choices {
+  display: flex;
+  gap: 8px;
+  button[aria-pressed='true'] {
+    outline: 1px solid #7155e0;
+  }
+}
+.note {
+  margin: 4px 22px 20px;
+  color: #848b9b;
+  font-size: 11px;
+  line-height: 1.8;
+}
+.error {
+  margin: 0 22px 12px;
+  color: #b44b4b;
+  font-size: 12px;
+}

@@ -10,3 +10,9 @@
 __pycache__/
 *.pyc
 /*.lnk
+
+/native/target/
+/desktop/resources/native-speed/*.exe
+/desktop/resources/native-speed/*.dll
+/desktop/resources/native-speed/*.lib
+/desktop/resources/native-speed/*.exp

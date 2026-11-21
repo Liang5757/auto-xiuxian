@@ -1,6 +1,6 @@
 {
   "name": "xiuxian-desktop",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "description": "修仙助手桌面应用",
   "author": "Liang5757",
@@ -27,10 +27,22 @@
       "assets/app.ico",
       "package.json"
     ],
+    "asarUnpack": [
+      "electron/speedy-probe.ps1"
+    ],
     "extraResources": [
       {
         "from": "../xiuxian-rs/target/release/xiuxian.exe",
         "to": "engine.exe"
+      },
+      {
+        "from": "resources/native-speed",
+        "to": "native-speed",
+        "filter": [
+          "*.exe",
+          "*.dll",
+          "*-LICENSE.txt"
+        ]
       }
     ],
     "win": {

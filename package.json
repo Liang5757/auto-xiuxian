@@ -1,6 +1,6 @@
 {
   "name": "xiuxian-workspace",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "workspaces": [
     "desktop"
@@ -13,12 +13,14 @@
     "test:engine": "cd xiuxian-rs && cargo test --locked --release",
     "check:engine": "cd xiuxian-rs && cargo clippy --locked --release --all-targets -- -D warnings",
     "build:renderer": "npm run build:renderer --workspace desktop",
-    "build": "npm run build:engine && npm run build --workspace desktop",
+    "build": "npm run build:speed && npm run build:engine && npm run build --workspace desktop",
     "check:functions": "node scripts/check-functions.mjs",
     "format:check": "prettier --check \"desktop/src/**/*.{ts,tsx,scss}\" \"desktop/electron/*.cjs\" \"scripts/*.mjs\"",
     "test:desktop": "npm run build:engine && node --test desktop/electron/*.test.cjs",
-    "check": "npm run format:check && npm run check:functions && npm run typecheck && npm run check:engine && npm run test:engine && npm run test:desktop",
-    "release:prepare": "node scripts/prepare-release.mjs"
+    "check": "npm run format:check && npm run check:functions && npm run typecheck && npm run check:engine && npm run test:engine && npm run test:desktop && npm run test:speed",
+    "release:prepare": "node scripts/prepare-release.mjs",
+    "build:speed": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-speed.ps1",
+    "test:speed": "npm run build:speed && node scripts/test-speed.mjs"
   },
   "devDependencies": {
     "prettier": "^3.9.10"

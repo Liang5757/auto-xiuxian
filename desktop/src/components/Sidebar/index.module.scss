@@ -46,17 +46,17 @@
     }
   }
 }
-.plane {
-  display: inline-block;
-  font-size: 19px;
-  transform: rotate(-35deg);
-  width: 19px;
-}
-.cursor {
-  font-size: 25px;
-  font-weight: 300;
-  line-height: 1;
-  width: 19px;
+.icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  svg {
+    display: block;
+    width: 20px;
+    height: 20px;
+  }
 }
 .connection {
   margin: auto 4px 0;
@@ -85,10 +85,6 @@
   }
 }
 
-.crop {
-  width: 19px;
-  font-size: 20px;
-}
 .master {
   display: flex;
   align-items: center;
